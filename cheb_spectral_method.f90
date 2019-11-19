@@ -1,5 +1,240 @@
 #define rkind 4
 
+module solver
+    implicit none
+
+contains
+
+    subroutine solve_linear_system(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        integer :: i
+
+        write(*,*) "L = "
+        do i = 0, n
+            write(*,*) a(i, :)
+        end do
+        write(*,*) "rhs = "
+        write(*,*) b
+
+        call gauss_with_pivot(n, a, b)
+
+        write(*,*) "solution = "
+        write(*,*) b
+    end subroutine solve_linear_system
+
+    subroutine jacobi_iteration(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        real(rkind), parameter :: eps = 1.0e-10
+        real(rkind), dimension(0:n) :: x0, x
+        integer, parameter :: max_iter = 40
+        real(rkind) :: diff, max_diff
+        integer :: i, j, iter
+
+        ! init guess solution x0
+        x0(:) = 1.0_rkind
+
+        do iter = 1, max_iter
+
+            max_diff = 0.0_rkind
+
+            do i = 0, n
+                x(i) = b(i)
+                do j = 0, n
+                    if (i /= j) then
+                        x(i) = x(i) - a(i, j) * x0(j)
+                    end if
+                end do
+                if ( abs(a(i,i)) < eps ) stop
+                x(i) = x(i) / a(i, i)
+
+                diff = abs( x(i) - x0(i) )
+                if (diff > max_diff) max_diff = diff
+            end do
+
+            ! whether stop the iteration?
+            if (max_diff < eps)  exit
+
+            write(*,*) "iter = ", iter, max_diff
+            x0(:) = x(:)
+
+        end do ! iter
+
+        b(:) = x(:)
+
+    end subroutine jacobi_iteration
+
+    subroutine gs_iteration(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        real(rkind), parameter :: eps = 1.0e-10
+        real(rkind), dimension(0:n) :: x
+        integer, parameter :: max_iter = 1000000
+        real(rkind) :: diff, max_diff, xold
+        integer :: i, j, iter
+
+        ! init guess solution x0
+        x(:) = 0.0
+
+        do iter = 1, max_iter
+
+            do i = 0, n
+                xold = x(i)
+
+                x(i) = b(i)
+                do j = 0, n
+                    if (i /= j) then
+                        x(i) = x(i) - a(i, j) * x(j)
+                    end if
+                end do
+                if ( abs(a(i,i)) < eps ) stop
+                x(i) = x(i) / a(i, i)
+
+                diff = abs( x(i) - xold )
+                if (diff > max_diff) max_diff = diff
+            end do
+
+            ! whether stop the iteration?
+            if (max_diff < eps)  exit
+
+        end do ! iter
+
+        b(:) = x(:)
+
+    end subroutine gs_iteration
+
+    subroutine gauss_with_pivot(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        real(rkind), parameter :: eps = 1.0e-10
+
+        integer :: i, j, k
+        integer :: pivot_row
+        integer :: perm(0:n)
+        real(rkind) :: d, pivot
+        real(rkind) :: temp(0:n)
+
+        do k = 0, n-1
+
+            ! 全选主元
+            pivot = 0.0_rkind
+            do i = k, n
+            do j = k, n
+                d = abs( a(i, j) )
+                if (d > pivot) then
+                    pivot = d;
+                    perm(k) = j;
+                    pivot_row = i;
+                end if
+            end do
+            end do
+
+            if (pivot + 1.0_rkind == 1.0_rkind) stop
+
+            if (perm(k) /= k) then  ! 主元列 <-> 当前列
+                temp(:) = a(:, perm(k))
+                a(:, perm(k)) = a(:, k)
+                a(:, k) = temp(:)
+            end if
+            if (pivot_row /= k) then ! 主元行 <-> 当前行
+                temp(:) = a(pivot_row, :)
+                a(pivot_row, :) = a(k, :)
+                a(k, :) = temp(:)
+
+                d = b(pivot_row)
+                b(pivot_row) = b(k)
+                b(k) = d
+            end if
+
+            do i = k+1, n
+                d = a(i, k) / a(k, k)
+
+                if ( d + 1.0_rkind /= 1.0_rkind ) then
+                    do j = k+1, n
+                        a(i, j) = a(i, j) - d * a(k, j)
+                    end do
+                    b(i) = b(i) - d * b(k)
+                end if
+            end do
+
+        end do ! k
+
+        ! 最后一行的主元判断
+        d = a(n, n)
+        if (d + 1.0_rkind == 1.0_rkind) stop
+
+        call solve_utriangle_system(n, a, b)
+
+        ! 恢复解向量
+        perm(n) = n
+        do k = n, 0, -1
+            if (perm(k) /= k) then
+                d = b(k)
+                b(k) = b(perm(k))
+                b(perm(k)) = d
+            end if
+        end do
+    end subroutine gauss_with_pivot
+
+    subroutine gauss_elimination(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        real(rkind), parameter :: eps = 1.0e-10
+
+        integer :: i, j, k
+        real(rkind) :: d
+
+        do k = 0, n-1
+            do i = k+1, n
+                d = a(i, k) / a(k, k)
+                if ( abs(a(k, k)) < eps) stop
+
+                if ( d /= 0.0 ) then
+                    do j = k+1, n
+                        a(i, j) = a(i, j) - d * a(k, j)
+                    end do
+                    b(i) = b(i) - d * b(k)
+                end if
+            end do
+        end do
+
+        call solve_utriangle_system(n, a, b)
+    end subroutine gauss_elimination
+
+    subroutine solve_utriangle_system(n, a, b)
+        implicit none
+        integer, intent(in) :: n
+        real(rkind), dimension(0:n, 0:n), intent(in) :: a
+        real(rkind), dimension(0:n), intent(inout) :: b
+
+        integer :: i, j
+
+        do j = n, 0, -1
+            b(j) = b(j) / a(j, j)
+            do i = 0, j-1
+                b(i) = b(i) - a(i, j) * b(j)
+            end do
+        end do
+    end subroutine solve_utriangle_system
+
+end module
+
 module cheb_spect_method
     implicit none
 !    integer, parameter :: rkind = kind(1.0)
@@ -72,6 +307,7 @@ contains
         real(rkind), dimension(0:n), intent(out) :: source
         interface
             pure elemental function fun(x)
+                implicit none
                 real(rkind), intent(in) :: x
                 real(rkind) :: fun
             end function fun
@@ -99,47 +335,51 @@ contains
         source(:) = matmul(mat(:,:), source(:))
     end subroutine get_spectrum_of_f
 
-    subroutine gauss_elimination(n, a, b)
+    subroutine show_error(n, m, coef, u)
         implicit none
-        integer, intent(in) :: n
-        real(rkind), dimension(0:n, 0:n), intent(inout) :: a
-        real(rkind), dimension(0:n), intent(inout) :: b
+        integer, intent(in) :: n, m
+        real(rkind), dimension(0:n), intent(in) :: coef
+        interface
+            pure elemental function u(x)
+                implicit none
+                real(rkind), intent(in) :: x
+                real(rkind)             :: u
+            end function u
+        end interface
 
-        integer :: i, j, k
-        real(rkind) :: d
+        integer :: i
+        real(rkind), dimension(0:m)     :: xval, u_calc, u_true
+        real(rkind), dimension(0:m, 0:n):: cheb_nodes_val
 
-        do k = 0, n-1
-            do i = k+1, n
-                d = a(i, k) / a(k, k)
-                do j = k+1, n
-                    a(i, j) = a(i, j) - d * a(k, j)
-                end do
-                b(i) = b(i) - d * b(k)
-            end do
+        ! 与真解比对误差
+        do i = 0, m
+            xval(i) = 2.0 / m * i + (-1.0)
+            !xval(i) = cos( PI * i / m )
+            call eval_cheb_upto_nth_order(n, xval(i), cheb_nodes_val(i, :))
+        end do
+        u_true(:) = u( xval(:) )
+        u_calc(:) = matmul( cheb_nodes_val, coef )
+
+        write(*,*) "#x, u_calc, u_true, u_error"
+        do i = 0, m
+            write(*,*) xval(i), u_calc(i), u_true(i), u_true(i) - u_calc(i)
         end do
 
-        call solve_utriangle_system(n, a, b)
-    end subroutine gauss_elimination
+    end subroutine show_error
 
-    subroutine solve_utriangle_system(n, a, b)
-        implicit none
-        integer, intent(in) :: n
-        real(rkind), dimension(0:n, 0:n), intent(in) :: a
-        real(rkind), dimension(0:n), intent(inout) :: b
-
-        integer :: i, j
-
-        do j = n, 0, -1
-            b(j) = b(j) / a(j, j)
-            do i = 0, j-1
-                b(i) = b(i) - a(i, j) * b(j)
-            end do
-        end do
-    end subroutine solve_utriangle_system
 end module cheb_spect_method
 
+module case_param
+    implicit none
+    integer, parameter              :: n = 40
+    integer, parameter              :: m = 8
+
+end module case_param
+
 module case01
+    use case_param
     use cheb_spect_method
+    use solver
     implicit none
 
     !---------------------------------------------------------------------------
@@ -162,11 +402,9 @@ module case01
     !
     !---------------------------------------------------------------------------
 
-    integer, parameter              :: n = 8
     real(rkind), dimension(0:n, 0:n):: deri1, deri2, coefMat
     real(rkind), dimension(0:n)     :: source
 
-    integer, parameter              :: m = 20
     real(rkind), dimension(0:m)     :: xval, u_calc, u_true
     real(rkind), dimension(0:m, 0:n):: cheb_nodes_val
 
@@ -192,35 +430,16 @@ contains
         call get_spectrum_of_f(n, f, source)
 
         ! 两个边界条件
-        call eval_cheb_upto_nth_order( n, -1.0, coefMat(n-1, :) )
-        call eval_cheb_upto_nth_order( n, +1.0, coefMat(n, :) )
+        call eval_cheb_upto_nth_order( n, -1.0_rkind, coefMat(n-1, :) )
+        call eval_cheb_upto_nth_order( n, +1.0_rkind, coefMat(n, :) )
         source(n-1) = 0.0
         source(n) = 0.0
 
-        write(*,*) "L = "
-        write(*,*) (coefMat(i, :), i = 0, n)
-        write(*,*) "rhs = "
-        write(*,*) source
-
         ! 求解线性方程组
-        call gauss_elimination( n, coefMat, source )
+        call solve_linear_system( n, coefMat, source )
 
-        write(*,*) "solution = "
-        write(*,*) source
+        call show_error( n, m, source, u)
 
-        ! 与真解比对误差
-        do i = 0, m
-            xval(i) = 2.0 / m * i + (-1.0)
-            !xval(i) = cos( PI * i / m )
-            call eval_cheb_upto_nth_order(n, xval(i), cheb_nodes_val(i, :))
-        end do
-        u_true(:) = u( xval(:) )
-        u_calc(:) = matmul( cheb_nodes_val, source )
-
-        write(*,*) "#x, u_calc, u_true, u_error"
-        do i = 0, m
-            write(*,*) xval(i), u_calc(i), u_true(i), u_true(i) - u_calc(i)
-        end do
     end subroutine chebyshev_tau_method
 
     pure elemental function f(x) result(y)
@@ -246,7 +465,9 @@ contains
 end module case01
 
 module case02
+    use case_param
     use cheb_spect_method
+    use solver
     implicit none
 
     !---------------------------------------------------------------------------
@@ -265,13 +486,9 @@ module case02
     !
     !---------------------------------------------------------------------------
 
-    integer, parameter              :: n = 4
     real(rkind), dimension(0:n, 0:n):: deri2, coefMat
     real(rkind), dimension(0:n)     :: source
 
-    integer, parameter              :: m = 10
-    real(rkind), dimension(0:m)     :: xval, u_calc, u_true
-    real(rkind), dimension(0:m, 0:n):: cheb_nodes_val
 
 contains
 
@@ -289,35 +506,16 @@ contains
         source(2:n) = source(0:n-2)
 
         ! 两个边界条件
-        call eval_cheb_upto_nth_order( n, -1.0, coefMat(0, :) )
-        call eval_cheb_upto_nth_order( n, +1.0, coefMat(1, :) )
+        call eval_cheb_upto_nth_order( n, -1.0_rkind, coefMat(0, :) )
+        call eval_cheb_upto_nth_order( n, +1.0_rkind, coefMat(1, :) )
         source(0) = 0.0
         source(1) = 0.0
 
-        write(*,*) "L = "
-        write(*,*) (coefMat(i, :), i = 0, n)
-        write(*,*) "rhs = "
-        write(*,*) source
-
         ! 求解线性方程组
-        call gauss_elimination( n, coefMat, source )
+        call solve_linear_system( n, coefMat, source )
 
-        write(*,*) "solution = "
-        write(*,*) source
+        call show_error( n, m, source, u)
 
-        ! 与真解比对误差
-        do i = 0, m
-            xval(i) = 2.0 / m * i + (-1.0)
-            !xval(i) = cos( PI * i / m )
-            call eval_cheb_upto_nth_order(n, xval(i), cheb_nodes_val(i, :))
-        end do
-        u_true(:) = u( xval(:) )
-        u_calc(:) = matmul( cheb_nodes_val, source )
-
-        write(*,*) "#x, u_calc, u_true, u_error"
-        do i = 0, m
-            write(*,*) xval(i), u_calc(i), u_true(i), u_true(i) - u_calc(i)
-        end do
     end subroutine chebyshev_tau_method
 
     pure elemental function f(x) result(y)
@@ -338,7 +536,7 @@ contains
 end module case02
 
 program cheb_spect_method_driver
-    use case02
+    use case01
     implicit none
 
     call chebyshev_tau_method()
